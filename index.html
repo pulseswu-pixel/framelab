@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FrameLab · 本地 AI 生图工作台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="upload.css" />
+    <link rel="stylesheet" href="interactions.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" id="home-link" href="#projects" aria-label="FrameLab 首页"><span class="brand-mark">F</span><span>FRAMELAB</span></a>
+        <nav class="nav">
+          <button class="nav-item active" data-view="projects"><span>▦</span>项目</button>
+          <button class="nav-item" data-view="create"><span>✦</span>生图工作台</button>
+          <button class="nav-item" data-view="settings"><span>⌘</span>API 管理</button>
+        </nav>
+        <div class="sidebar-bottom"><span class="status-dot"></span> 本地模式</div>
+      </aside>
+
+      <main>
+        <section class="view active" id="projects">
+          <header class="page-header"><div><p class="eyebrow">WORKSPACE / 08</p><h1>项目</h1></div><button class="outline-btn" id="open-settings">管理 API <span>↗</span></button></header>
+          <div class="project-grid" id="project-grid"></div>
+          <button class="new-project" id="new-project"><span>＋</span><small>新建项目</small></button>
+        </section>
+
+        <section class="view" id="create">
+          <header class="workspace-head"><button class="back-button" data-view="projects">← <span>项目</span></button><div class="project-name"><span class="status-dot"></span><input id="project-title" value="角色视觉探索" aria-label="项目名称" /></div><div class="head-actions"><button class="icon-btn" title="刷新">↻</button><button class="icon-btn" title="项目选项">•••</button></div></header>
+          <div class="create-layout">
+            <section class="canvas-area">
+              <div class="canvas-toolbar"><span>共 <b id="history-count">0</b> 张作品</span><div class="workspace-tools"><button class="tiny-button" id="filter-button">筛选</button><button class="tiny-button" id="sort-button">排序</button><div class="tool-menu" id="filter-menu"><button data-filter="all">全部作品</button><button data-filter="reference">有参考图</button><button data-filter="no-reference">无参考图</button></div><div class="tool-menu" id="sort-menu"><button data-sort="newest">最新生成</button><button data-sort="oldest">最早生成</button></div></div></div>
+              <div class="history-grid" id="history-grid"></div>
+            </section>
+            <aside class="prompt-panel">
+              <div class="panel-title"><span>新建画面</span><button title="收起">⌄</button></div>
+              <div class="upload-zone" id="upload-zone"><div class="reference-row" id="reference-row"><label class="ref-add" title="添加参考图"><input type="file" id="reference-input" accept="image/*" multiple />＋</label></div><span class="drop-hint">点击、拖入或 Ctrl+V 粘贴参考图</span></div>
+              <label class="field-label" for="prompt">提示词</label>
+              <textarea id="prompt">绘制一张角色设定图：温暖、精致的 3D 潮玩人物，正面全身站姿，白色影棚背景，柔和自然光，商业渲染质感。请保持比例协调，服装有丰富的细节与材质。</textarea>
+              <div class="select-row quad-select"><label><span>模型</span><select id="model"><option value="banana">Nano Banana Pro</option><option value="chatgpt">ChatGPT Img2</option></select></label><label><span>画幅</span><select id="ratio"><option>16:9</option><option>21:9</option><option>1:1</option><option>9:16</option><option>4:3</option><option value="auto">自适应尺寸</option></select></label><label><span>图像尺寸</span><select id="image-size"><option>1K</option><option>2K</option><option>4K</option></select></label><label><span>生成数量</span><select id="batch-count"><option value="1">1 张</option><option value="2">2 张</option><option value="3">3 张</option><option value="4">4 张</option></select></label></div>
+              <button class="generate-btn" id="generate"><span>生成图像</span><b>→</b></button>
+              <p class="local-note" id="generate-status">生成记录仅保存在此电脑浏览器中</p>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="settings">
+          <div class="settings-wrap">
+            <header class="settings-head"><button class="back-button light" data-view="projects">← 返回工作区</button><p>LOCAL CONTROL</p><h1>API 管理</h1><span>在本机保存并切换图像生成服务</span></header>
+            <div class="api-grid">
+              <article class="api-card selected" data-provider="banana"><div class="api-card-top"><span class="provider-icon banana">N</span><span class="connected">● 已配置</span></div><h2>Nano Banana Pro</h2><p>当前默认的图像生成服务</p><button class="text-btn select-provider">设为默认</button></article>
+              <article class="api-card" data-provider="chatgpt"><div class="api-card-top"><span class="provider-icon openai">◉</span><span class="connected">● 已配置</span></div><h2>ChatGPT Img2</h2><p>GPT 图像生成服务</p><button class="text-btn select-provider">设为默认</button></article>
+            </div>
+            <form class="api-form" id="api-form"><div class="form-caption"><span>CONNECTION</span><b id="provider-form-title">Nano Banana Pro</b></div><label>基础节点<input id="endpoint" placeholder="https://grsai.dakka.com.cn" /></label><label>API Key<div class="secret-field"><input id="api-key" type="password" placeholder="输入 API Key" /><button type="button" id="toggle-key">显示</button></div></label><label>模型 ID<input id="model-id" placeholder="nano-banana-2" /></label><div class="form-footer"><span id="save-status">密钥仅保存在本机浏览器</span><button class="save-btn" type="submit">保存配置</button></div></form>
+            <div class="api-help"><b>接入说明</b><span>已按 Grsai 文档接入：本机服务会把请求转发至「基础节点 /v1/api/generate」，并在必要时自动查询生成结果。</span></div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <template id="project-template"><article class="project-card"><img /><div class="project-overlay"><h2></h2><div class="project-meta"><span class="project-date"></span><button class="project-more" title="更多选项">•••</button><div class="project-menu"><button class="rename-project">修改项目名称</button><button class="delete-project">删除项目</button></div></div></div></article></template>
+    <template id="history-template"><article class="history-card"><img /><div class="history-actions"><button class="image-download" title="下载图片">↓</button><button class="image-regenerate" title="重新生成">↻</button></div></article></template>
+    <div class="image-modal" id="image-modal" aria-hidden="true"><button class="modal-close" id="modal-close">×</button><img id="modal-image" alt="放大的生成图像" /><a id="modal-download" download="framelab-image.png">下载图片 ↓</a></div>
+    <script src="app.js"></script>
+  </body>
+</html>
