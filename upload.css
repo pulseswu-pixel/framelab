@@ -1,5 +1,11 @@
 .upload-zone { border: 1px dashed #3b3b39; border-radius: 9px; padding: 9px 10px 7px; margin-bottom: 18px; transition: .2s; }
 .upload-zone.dragging { border-color: var(--lime); background: #202512; }
-.upload-zone .reference-row { min-height: 55px; margin-bottom: 0; }
+.upload-zone .reference-row { min-height: 55px; margin-bottom: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
 .drop-hint { display: block; color: #767671; font-size: 10px; margin-top: 7px; }
-.upload-zone .ref-image { cursor: pointer; }
+.upload-zone .ref-image { position: relative; width: 52px; height: 52px; border-radius: 6px; overflow: hidden; flex-shrink: 0; cursor: grab; border: 1px solid #42423e; }
+.upload-zone .ref-image:hover { border-color: #666; }
+.upload-zone .ref-image.dragging-ref { opacity: .4; cursor: grabbing; }
+.upload-zone .ref-image img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.upload-zone .ref-delete { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; display: grid; place-items: center; background: #d94040; color: #fff; border: 2px solid #1a1a18; border-radius: 50%; font-size: 11px; line-height: 1; cursor: pointer; padding: 0; z-index: 3; }
+.upload-zone .ref-delete:hover { background: #ff5050; }
+.upload-zone .ref-add.hidden { display: none; }
