@@ -101,6 +101,8 @@ const server = http.createServer(async (req, res) => { try {
   if (req.method === 'POST' && req.url === '/api/save-image') { const { imageUrl } = await readJson(req); if (!imageUrl) return send(res, 400, { error: '缺少图片地址' }); return send(res, 200, { url: await saveImage(imageUrl) }); }
   if (req.method === 'GET' && req.url === '/api/projects') return send(res, 200, await readProjects());
   if (req.method === 'POST' && req.url === '/api/projects') { const list = await readJson(req); await writeProjects(Array.isArray(list) ? list : []); return send(res, 200, { ok: true }); }
+  if (req.method === 'GET' && req.url === '/api/config') { try { const r = await new Promise((resolve, reject) => { cos.getObject({ Bucket: cosConfig.Bucket, Region: cosConfig.Region, Key: 'data/api-config.json' }, (err, result) => err ? reject(err) : resolve(result.Body.toString('utf8'))); }); return send(res, 200, r, 'application/json; charset=utf-8'); } catch { return send(res, 200, '{}', 'application/json; charset=utf-8'); } }
+  if (req.method === 'POST' && req.url === '/api/config') { const cfg = await readJson(req); await uploadToCos(Buffer.from(JSON.stringify(cfg, null, 2), 'utf8'), 'data/api-config.json'); return send(res, 200, { ok: true }); }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
   const relative = req.url === '/' ? 'index.html' : decodeURIComponent(req.url.split('?')[0]).replace(/^\//, '');
   const file = path.resolve(root, relative);
