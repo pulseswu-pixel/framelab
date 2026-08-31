@@ -92,11 +92,42 @@ async function writeProjects(list) {
   fs.writeFileSync(dataFile, json);
 }
 
+// === 异步任务存储 ===
+const tasks = new Map();
+
 const port = Number(process.env.PORT) || 4173;
 const server = http.createServer(async (req, res) => { try {
   if (req.method === 'OPTIONS') return send(res, 204, '');
   if (req.method === 'GET' && req.url === '/health') return send(res, 200, { status: 'ok', cos: cosEnabled ? 'enabled' : 'disabled (local mode)' });
-  if (req.method === 'POST' && req.url === '/api/generate') { const { baseUrl, apiKey, payload } = await readJson(req); if (!baseUrl || !apiKey) return send(res, 400, { error: '请先在 API 管理中填写基础节点和 API Key。' }); const r = await fetch(`${base(baseUrl)}/v1/api/generate`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const data = await r.json(); if (!r.ok) return send(res, r.status, { error: data.message || data.error?.message || 'API 请求失败' }); const generated = data.status === 'succeeded' || data.results?.[0]?.url ? data : await result(base(baseUrl), apiKey, data.id); if (!generated.results?.[0]?.url) return send(res, 500, { error: 'API 返回数据异常' }); return send(res, 200, { url: await saveImage(generated.results[0].url) }); }
+  if (req.method === 'POST' && req.url === '/api/generate') {
+    const { baseUrl, apiKey, payload } = await readJson(req);
+    if (!baseUrl || !apiKey) return send(res, 400, { error: '请先在 API 管理中填写基础节点和 API Key。' });
+    const taskId = `task-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    tasks.set(taskId, { status: 'pending', url: null, error: null });
+    (async () => {
+      try {
+        const r = await fetch(`${base(baseUrl)}/v1/api/generate`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.message || data.error?.message || 'API 请求失败');
+        const generated = data.status === 'succeeded' || data.results?.[0]?.url ? data : await result(base(baseUrl), apiKey, data.id);
+        if (!generated.results?.[0]?.url) throw new Error('API 返回数据异常');
+        const savedUrl = await saveImage(generated.results[0].url);
+        tasks.set(taskId, { status: 'done', url: savedUrl, error: null });
+      } catch (err) {
+        tasks.set(taskId, { status: 'failed', url: null, error: err.message || '生成失败' });
+      }
+    })();
+    return send(res, 200, { taskId });
+  }
+  if (req.method === 'GET' && req.url.startsWith('/api/status?')) {
+    const params = new URL(req.url, 'http://localhost').searchParams;
+    const taskId = params.get('id');
+    if (!taskId || !tasks.has(taskId)) return send(res, 404, { error: '任务不存在' });
+    const task = tasks.get(taskId);
+    const resp = { status: task.status, url: task.url, error: task.error };
+    if (task.status === 'done' || task.status === 'failed') tasks.delete(taskId);
+    return send(res, 200, resp);
+  }
   if (req.method === 'POST' && req.url === '/api/save-reference') { const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) }); }
   if (req.method === 'POST' && req.url === '/api/save-image') { const { imageUrl } = await readJson(req); if (!imageUrl) return send(res, 400, { error: '缺少图片地址' }); return send(res, 200, { url: await saveImage(imageUrl) }); }
   if (req.method === 'GET' && req.url === '/api/projects') return send(res, 200, await readProjects());
