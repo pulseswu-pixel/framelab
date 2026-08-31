@@ -65,10 +65,32 @@ async function saveImage(imageUrl) {
   return await saveImageToStorage(buffer, extension);
 }
 
-// === 项目记录存储（本地 JSON 文件）===
+// === 项目记录存储（COS 优先，本地降级）===
 const dataFile = path.join(root, 'data', 'projects.json');
-function readProjects() { try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')) || []; } catch { return []; } }
-function writeProjects(list) { fs.mkdirSync(path.dirname(dataFile), { recursive: true }); fs.writeFileSync(dataFile, JSON.stringify(list, null, 2)); }
+const cosProjectsKey = 'data/projects.json';
+
+async function readProjects() {
+  if (cosEnabled) {
+    try {
+      const data = await new Promise((resolve, reject) => {
+        cos.getObject({ Bucket: cosConfig.Bucket, Region: cosConfig.Region, Key: cosProjectsKey }, (err, result) => {
+          if (err) reject(err); else resolve(result.Body.toString('utf8'));
+        });
+      });
+      return JSON.parse(data) || [];
+    } catch { /* COS 上没有记录文件，降级 */ }
+  }
+  try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')) || []; } catch { return []; }
+}
+
+async function writeProjects(list) {
+  const json = JSON.stringify(list, null, 2);
+  if (cosEnabled) {
+    try { await uploadToCos(Buffer.from(json, 'utf8'), cosProjectsKey); } catch {}
+  }
+  fs.mkdirSync(path.dirname(dataFile), { recursive: true });
+  fs.writeFileSync(dataFile, json);
+}
 
 const port = Number(process.env.PORT) || 4173;
 const server = http.createServer(async (req, res) => { try {
@@ -77,8 +99,8 @@ const server = http.createServer(async (req, res) => { try {
   if (req.method === 'POST' && req.url === '/api/generate') { const { baseUrl, apiKey, payload } = await readJson(req); if (!baseUrl || !apiKey) return send(res, 400, { error: '请先在 API 管理中填写基础节点和 API Key。' }); const r = await fetch(`${base(baseUrl)}/v1/api/generate`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const data = await r.json(); if (!r.ok) return send(res, r.status, { error: data.message || data.error?.message || 'API 请求失败' }); const generated = data.status === 'succeeded' || data.results?.[0]?.url ? data : await result(base(baseUrl), apiKey, data.id); if (!generated.results?.[0]?.url) return send(res, 500, { error: 'API 返回数据异常' }); return send(res, 200, { url: await saveImage(generated.results[0].url) }); }
   if (req.method === 'POST' && req.url === '/api/save-reference') { const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) }); }
   if (req.method === 'POST' && req.url === '/api/save-image') { const { imageUrl } = await readJson(req); if (!imageUrl) return send(res, 400, { error: '缺少图片地址' }); return send(res, 200, { url: await saveImage(imageUrl) }); }
-  if (req.method === 'GET' && req.url === '/api/projects') return send(res, 200, readProjects());
-  if (req.method === 'POST' && req.url === '/api/projects') { const list = await readJson(req); writeProjects(Array.isArray(list) ? list : []); return send(res, 200, { ok: true }); }
+  if (req.method === 'GET' && req.url === '/api/projects') return send(res, 200, await readProjects());
+  if (req.method === 'POST' && req.url === '/api/projects') { const list = await readJson(req); await writeProjects(Array.isArray(list) ? list : []); return send(res, 200, { ok: true }); }
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
   const relative = req.url === '/' ? 'index.html' : decodeURIComponent(req.url.split('?')[0]).replace(/^\//, '');
   const file = path.resolve(root, relative);
