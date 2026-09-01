@@ -6,7 +6,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 const send = (res, status, body, type = 'application/json; charset=utf-8') => { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 const base = value => String(value || '').replace(/\/+$/, '');
 async function readJson(req) { const chunks = []; for await (const chunk of req) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString() || '{}'); }
-async function result(baseUrl, key, id) { for (let n = 0; n < 30; n++) { await new Promise(done => setTimeout(done, 2000)); const r = await fetch(`${baseUrl}/v1/api/result?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${key}` } }); const data = await r.json(); if (data.status === 'succeeded' || data.results?.[0]?.url) return data; if (data.status === 'failed') throw new Error(data.error?.message || '图像生成失败'); } throw new Error('生成超时，请稍后重试'); }
+async function result(baseUrl, key, id) { for (let n = 0; n < 100; n++) { await new Promise(done => setTimeout(done, n < 5 ? 2000 : n < 15 ? 3000 : 5000)); const r = await fetch(`${baseUrl}/v1/api/result?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${key}` } }); const data = await r.json(); if (data.status === 'succeeded' || data.results?.[0]?.url) return data; if (data.status === 'failed') throw new Error(data.error?.message || '图像生成失败'); } throw new Error('生成超时（超过5分钟），请稍后重试'); }
 
 // === COS 配置 ===
 const COS = require('cos-nodejs-sdk-v5');
@@ -122,10 +122,10 @@ const server = http.createServer(async (req, res) => { try {
   if (req.method === 'GET' && req.url.startsWith('/api/status?')) {
     const params = new URL(req.url, 'http://localhost').searchParams;
     const taskId = params.get('id');
-    if (!taskId || !tasks.has(taskId)) return send(res, 404, { error: '任务不存在' });
+    if (!taskId || !tasks.has(taskId)) return send(res, 200, { status: 'pending' });
     const task = tasks.get(taskId);
     const resp = { status: task.status, url: task.url, error: task.error };
-    if (task.status === 'done' || task.status === 'failed') tasks.delete(taskId);
+    if (task.status === 'done' || task.status === 'failed') { task.completedAt = Date.now(); setTimeout(() => tasks.delete(taskId), 60000); }
     return send(res, 200, resp);
   }
   if (req.method === 'POST' && req.url === '/api/save-reference') { const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) }); }
