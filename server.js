@@ -6,6 +6,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 const send = (res, status, body, type = 'application/json; charset=utf-8') => { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 const base = value => String(value || '').replace(/\/+$/, '');
 async function readJson(req) { const chunks = []; for await (const chunk of req) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString() || '{}'); }
+function readMultipart(req) { return new Promise(resolve => { const chunks = []; req.on('data', c => chunks.push(c)); req.on('end', () => { const buf = Buffer.concat(chunks); const ct = req.headers['content-type'] || ''; const bIdx = ct.indexOf('boundary='); const boundaryStr = bIdx >= 0 ? ct.slice(bIdx + 9) : ''; const boundary = Buffer.from('--' + boundaryStr); const files = []; let start = buf.indexOf(boundary); if (start === -1) return resolve(files); start += boundary.length; while (start < buf.length) { if (buf.slice(start, start + 2).toString() === '--') break; start += 2; const nextBoundary = buf.indexOf(boundary, start); if (nextBoundary === -1) break; const part = buf.slice(start, nextBoundary - 2); const headerEnd = part.indexOf('\r\n\r\n'); if (headerEnd === -1) break; const header = part.slice(0, headerEnd).toString(); const nameMatch = header.match(/name="([^"]+)"/); const filenameMatch = header.match(/filename="([^"]+)"/); const typeMatch = header.match(/Content-Type: ([^\r\n]+)/); files.push({ name: nameMatch?.[1] || '', filename: filenameMatch?.[1] || '', type: typeMatch?.[1] || 'image/png', data: part.slice(headerEnd + 4) }); start = nextBoundary + boundary.length; } resolve(files); }); }); }
 async function result(baseUrl, key, id) { for (let n = 0; n < 100; n++) { await new Promise(done => setTimeout(done, n < 5 ? 2000 : n < 15 ? 3000 : 5000)); const r = await fetch(`${baseUrl}/v1/api/result?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${key}` } }); const data = await r.json(); if (data.status === 'succeeded' || data.results?.[0]?.url) return data; if (data.status === 'failed') throw new Error(data.error?.message || '图像生成失败'); } throw new Error('生成超时（超过5分钟），请稍后重试'); }
 
 // === COS 配置 ===
@@ -68,6 +69,8 @@ async function saveImage(imageUrl) {
 // === 项目记录存储（COS 优先，本地降级）===
 const dataFile = path.join(root, 'data', 'projects.json');
 const cosProjectsKey = 'data/projects.json';
+let writeDebounceTimer = null;
+let writeDebounceData = null;
 
 async function readProjects() {
   if (cosEnabled) {
@@ -84,12 +87,17 @@ async function readProjects() {
 }
 
 async function writeProjects(list) {
+  writeDebounceData = list;
   const json = JSON.stringify(list, null, 2);
-  if (cosEnabled) {
-    try { await uploadToCos(Buffer.from(json, 'utf8'), cosProjectsKey); } catch {}
-  }
   fs.mkdirSync(path.dirname(dataFile), { recursive: true });
   fs.writeFileSync(dataFile, json);
+  if (writeDebounceTimer) clearTimeout(writeDebounceTimer);
+  writeDebounceTimer = setTimeout(async () => {
+    const data = writeDebounceData;
+    writeDebounceData = null;
+    writeDebounceTimer = null;
+    if (cosEnabled && data) { try { await uploadToCos(Buffer.from(JSON.stringify(data, null, 2), 'utf8'), cosProjectsKey); } catch {} }
+  }, 2000);
 }
 
 // === 异步任务存储 ===
@@ -150,7 +158,16 @@ const server = http.createServer(async (req, res) => { try {
     if (Array.isArray(taskIds)) taskIds.forEach(id => { if (tasks.has(id)) { tasks.get(id).saved = true; setTimeout(() => tasks.delete(id), 30000); } });
     return send(res, 200, { ok: true });
   }
-  if (req.method === 'POST' && req.url === '/api/save-reference') { const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) }); }
+  if (req.method === 'POST' && req.url === '/api/save-reference') {
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('multipart/form-data')) {
+      const files = await readMultipart(req);
+      const urls = [];
+      for (const file of files) { const ext = file.type.includes('jpeg') || file.type.includes('jpg') ? 'jpg' : file.type.includes('webp') ? 'webp' : 'png'; urls.push(await saveReferenceToStorage(file.data, ext)); }
+      return send(res, 200, { urls });
+    }
+    const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) });
+  }
   if (req.method === 'POST' && req.url === '/api/save-image') { const { imageUrl } = await readJson(req); if (!imageUrl) return send(res, 400, { error: '缺少图片地址' }); return send(res, 200, { url: await saveImage(imageUrl) }); }
   if (req.method === 'GET' && req.url === '/api/projects') return send(res, 200, await readProjects());
   if (req.method === 'POST' && req.url === '/api/projects') { const list = await readJson(req); await writeProjects(Array.isArray(list) ? list : []); return send(res, 200, { ok: true }); }
