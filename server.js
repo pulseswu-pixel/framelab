@@ -94,16 +94,17 @@ async function writeProjects(list) {
 
 // === 异步任务存储 ===
 const tasks = new Map();
+// task 结构: { status, url, error, meta: { projectId, model, index, prompt, ratio, batchCount, refUrls }, createdAt }
 
 const port = Number(process.env.PORT) || 4173;
 const server = http.createServer(async (req, res) => { try {
   if (req.method === 'OPTIONS') return send(res, 204, '');
   if (req.method === 'GET' && req.url === '/health') return send(res, 200, { status: 'ok', cos: cosEnabled ? 'enabled' : 'disabled (local mode)' });
   if (req.method === 'POST' && req.url === '/api/generate') {
-    const { baseUrl, apiKey, payload } = await readJson(req);
+    const { baseUrl, apiKey, payload, meta } = await readJson(req);
     if (!baseUrl || !apiKey) return send(res, 400, { error: '请先在 API 管理中填写基础节点和 API Key。' });
     const taskId = `task-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    tasks.set(taskId, { status: 'pending', url: null, error: null });
+    tasks.set(taskId, { status: 'pending', url: null, error: null, meta: meta || {}, createdAt: Date.now() });
     (async () => {
       try {
         const r = await fetch(`${base(baseUrl)}/v1/api/generate`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -112,9 +113,9 @@ const server = http.createServer(async (req, res) => { try {
         const generated = data.status === 'succeeded' || data.results?.[0]?.url ? data : await result(base(baseUrl), apiKey, data.id);
         if (!generated.results?.[0]?.url) throw new Error('API 返回数据异常');
         const savedUrl = await saveImage(generated.results[0].url);
-        tasks.set(taskId, { status: 'done', url: savedUrl, error: null });
+        tasks.set(taskId, { ...tasks.get(taskId), status: 'done', url: savedUrl, error: null });
       } catch (err) {
-        tasks.set(taskId, { status: 'failed', url: null, error: err.message || '生成失败' });
+        tasks.set(taskId, { ...tasks.get(taskId), status: 'failed', url: null, error: err.message || '生成失败' });
       }
     })();
     return send(res, 200, { taskId });
@@ -127,6 +128,27 @@ const server = http.createServer(async (req, res) => { try {
     const resp = { status: task.status, url: task.url, error: task.error };
     if (task.status === 'done' || task.status === 'failed') { task.completedAt = Date.now(); setTimeout(() => tasks.delete(taskId), 60000); }
     return send(res, 200, resp);
+  }
+  if (req.method === 'GET' && req.url.startsWith('/api/tasks')) {
+    const params = new URL(req.url, 'http://localhost').searchParams;
+    const projectId = params.get('projectId');
+    const list = [];
+    for (const [taskId, task] of tasks) {
+      if (projectId && task.meta?.projectId !== projectId) continue;
+      if (task.status === 'pending') {
+        list.push({ taskId, status: 'pending', meta: task.meta });
+      } else if (task.status === 'done' && !task.saved) {
+        list.push({ taskId, status: 'done', url: task.url, meta: task.meta });
+      } else if (task.status === 'failed' && !task.saved) {
+        list.push({ taskId, status: 'failed', error: task.error, meta: task.meta });
+      }
+    }
+    return send(res, 200, { tasks: list });
+  }
+  if (req.method === 'POST' && req.url === '/api/tasks/saved') {
+    const { taskIds } = await readJson(req);
+    if (Array.isArray(taskIds)) taskIds.forEach(id => { if (tasks.has(id)) { tasks.get(id).saved = true; setTimeout(() => tasks.delete(id), 30000); } });
+    return send(res, 200, { ok: true });
   }
   if (req.method === 'POST' && req.url === '/api/save-reference') { const { imageData } = await readJson(req); if (!imageData) return send(res, 400, { error: '缺少图片数据' }); const match = imageData.match(/^data:image\/(\w+);base64,(.+)/); if (!match) return send(res, 400, { error: '无效的图片数据格式' }); const ext = match[1] === 'jpeg' ? 'jpg' : match[1]; const buf = Buffer.from(match[2], 'base64'); return send(res, 200, { url: await saveReferenceToStorage(buf, ext) }); }
   if (req.method === 'POST' && req.url === '/api/save-image') { const { imageUrl } = await readJson(req); if (!imageUrl) return send(res, 400, { error: '缺少图片地址' }); return send(res, 200, { url: await saveImage(imageUrl) }); }
